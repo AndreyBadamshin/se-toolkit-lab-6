@@ -12,6 +12,7 @@ By the end of this lab, students should be able to:
 - [Apply] Query the VictoriaMetrics and VictoriaLogs HTTP APIs from a Python CLI to retrieve metrics and log entries.
 - [Apply] Implement a minimal agentic loop in Python that gives an LLM access to observability tools and iterates until the LLM stops calling tools.
 - [Analyze] Interpret telemetry signals — high error rates, slow response times, spike in log errors — to diagnose a simulated system anomaly.
+- [Evaluate] Assess how the set of tools exposed to an agent affects the completeness of its diagnosis by comparing outputs with different tool configurations.
 
 In simple words:
 
@@ -20,6 +21,7 @@ In simple words:
 > 3. I can write Python code that queries VictoriaMetrics and VictoriaLogs and displays the results in the terminal.
 > 4. I can build a loop that lets an LLM call my observability tools and stop when it has an answer.
 > 5. I can read metrics and logs from the stack and explain what they reveal about the system's health.
+> 6. I can compare what the agent produces with different tools enabled and explain why wider tool access leads to a better diagnosis.
 
 ## Lab story
 
@@ -66,9 +68,9 @@ Building on the API knowledge from Task 1, students implement a Python CLI with 
 
 ### Task 3 — Implement the Agentic Loop
 
-**Purpose:** Build the simplest possible agentic loop — an LLM that calls the observability tools from Task 2 iteratively until it can produce a diagnosis — and observe how tool use and context accumulation drive autonomous reasoning.
+**Purpose:** Build the simplest possible agentic loop — an LLM that calls the observability tools from Task 2 iteratively until it can produce a diagnosis — and observe how tool availability and context accumulation drive autonomous reasoning.
 
-Students extend the CLI with an `investigate` subcommand. The command implements a minimal agentic loop: (1) send the user's question and a tool schema to the LLM; (2) if the LLM returns a tool call, execute the matching Python function and append the result to the message history; (3) repeat until the LLM returns a text response with no tool calls; (4) display the final diagnosis using `rich`. The available tools are the metric and log query functions from Task 2. The seed project provides the message-history accumulation skeleton with `# UNCOMMENT AND FILL IN` placeholders; students implement the tool-dispatch loop and the tool schema definitions. A Docker Compose service runs a simulated anomaly (a spike in HTTP 500 errors) that the agent must identify. Students observe the full loop in action, note how many iterations the agent takes, and record the finding in a comment on their issue.
+Students extend the CLI with an `investigate` subcommand. The command implements a minimal agentic loop: (1) send the user's question and a tool schema to the LLM; (2) if the LLM returns a tool call, execute the matching Python function and append the result to the message history; (3) repeat until the LLM returns a text response with no tool calls; (4) display the final diagnosis using `rich`. The available tools are the metric and log query functions from Task 2. The seed project provides the message-history accumulation skeleton with `# UNCOMMENT AND FILL IN` placeholders; students implement the tool-dispatch loop and the tool schema definitions. A Docker Compose service runs a simulated anomaly (a spike in HTTP 500 errors) that the agent must identify. Students observe the full loop in action, note how many iterations the agent takes, and record the finding in a comment on their issue. As a final step, students disable one of the two tools and re-run the agent to observe how the narrower tool set produces a less complete diagnosis — making visible that an agent's debugging ability is defined by the tools it can access.
 
 **Acceptance criteria:**
 
@@ -76,7 +78,7 @@ Students extend the CLI with an `investigate` subcommand. The command implements
 - The agent executes at least two tool calls before producing its final answer (visible in the loop debug output).
 - The agent correctly identifies the simulated anomaly (elevated HTTP 500 rate) in its diagnosis text.
 - A PR with the implementation is approved and merged.
-- The issue contains a comment with the agent's final diagnosis output pasted as a code block.
+- The issue contains a comment with the agent's diagnosis from the full-tool run and the single-tool run, each pasted as a code block.
 
 ---
 
