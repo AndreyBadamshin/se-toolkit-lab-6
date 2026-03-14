@@ -46,14 +46,21 @@ def scan_file(filepath: Path) -> list[tuple[int, str, str, str]]:
                         all_todo = False
                         break
                 if all_todo and todo_comments:
-                    results.append((heading_line, heading_text, "TODO", " | ".join(todo_comments)))
+                    results.append(
+                        (heading_line, heading_text, "TODO", " | ".join(todo_comments))
+                    )
         i += 1
     return results
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("path", nargs="?", default=None, help="Directory to scan (default: lab/tasks/ and wiki/)")
+    parser.add_argument(
+        "path",
+        nargs="?",
+        default=None,
+        help="Directory to scan (default: lab/tasks/ and wiki/)",
+    )
     parser.add_argument("--output", required=True, help="Path to write the report to")
     args = parser.parse_args()
 
@@ -121,7 +128,9 @@ def main() -> None:
                     if kind == "empty":
                         out.append(f"- [{label}]({link_target}) — {heading} (empty)")
                     else:
-                        out.append(f"- [{label}]({link_target}) — {heading} (TODO: {comment})")
+                        out.append(
+                            f"- [{label}]({link_target}) — {heading} (TODO: {comment})"
+                        )
                 out.append("")
 
     out.append("---")

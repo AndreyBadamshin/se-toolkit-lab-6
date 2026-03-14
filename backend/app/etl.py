@@ -159,9 +159,7 @@ async def load_logs(
         # Skip if already exists (idempotent upsert)
         existing = (
             await session.exec(
-                select(InteractionLog).where(
-                    InteractionLog.external_id == log["id"]
-                )
+                select(InteractionLog).where(InteractionLog.external_id == log["id"])
             )
         ).first()
         if existing:
@@ -196,11 +194,7 @@ async def sync(session: AsyncSession) -> dict:
     await load_items(api_items, session)
 
     # Determine last sync point
-    result = (
-        await session.exec(
-            select(func.max(InteractionLog.created_at))
-        )
-    ).first()
+    result = (await session.exec(select(func.max(InteractionLog.created_at)))).first()
     since = result if result else None
 
     # Fetch and load logs

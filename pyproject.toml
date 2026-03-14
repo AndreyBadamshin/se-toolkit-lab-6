@@ -97,7 +97,7 @@ envfile = ".env.tests.e2e.secret"
 
 [tool.pyright]
 include = ["backend"]
-exclude = ["**/__pycache__", "**/node_modules", "**/.*", ".venv", ".direnv"]
+exclude = ["**/__pycache__", "**/node_modules", "**/.*", ".venv", ".direnv", "agent.py"]
 typeCheckingMode = "strict"
 reportAssignmentType = "none"
 reportIncompatibleVariableOverride = "none"
