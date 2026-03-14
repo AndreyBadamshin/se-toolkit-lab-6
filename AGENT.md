@@ -38,6 +38,7 @@ LLM_MODEL=coder-model
 │         │ tool calls                                        │
 │         ├──────────▶ read_file(path) ──▶ wiki/, source code │
 │         ├──────────▶ list_files(dir)  ──▶ directory listing │
+│         ├──────────▶ query_api(method, path) ──▶ backend    │
 │         │                                                   │
 │         ▼                                                   │
 │  Structured JSON Output                                     │
@@ -110,6 +111,32 @@ List files and directories at a given path.
 {"tool": "list_files", "args": {"path": "wiki"}, "result": "git.md\ngit-workflow.md\n..."}
 ```
 
+### `query_api`
+
+Call the backend API to query data or check system status.
+
+**Parameters:**
+- `method` (string, required) — HTTP method (GET, POST, PUT, DELETE, PATCH)
+- `path` (string, required) — API endpoint path (e.g., `/items/`, `/analytics/scores`)
+- `body` (string, optional) — JSON request body for POST/PUT/PATCH requests
+
+**Returns:** JSON string with `status_code` and `body`, or an error message.
+
+**Authentication:** Uses `LMS_API_KEY` from `.env.docker.secret` (backend API key, not LLM key).
+
+**Example:**
+```json
+{
+  "tool": "query_api",
+  "args": {"method": "GET", "path": "/items/"},
+  "result": "{\"status_code\": 200, \"body\": \"[{\\\"id\\\": 1, ...}]\"}"
+}
+```
+
+**Error Handling:**
+- Network errors return `{"status_code": 0, "body": "Request error: ..."}`
+- Invalid JSON body returns `{"status_code": 0, "body": "Invalid JSON body: ..."}`
+
 ## Path Security
 
 Tools implement path traversal protection:
@@ -125,23 +152,39 @@ Tools implement path traversal protection:
 
 ## System Prompt Strategy
 
-The system prompt guides the LLM to:
+The system prompt guides the LLM to choose the right tool for each question type:
 
 ```
-You are a helpful assistant that answers questions by reading project documentation.
+You are a helpful assistant that answers questions by reading project documentation, source code, and querying the backend API.
 
-You have two tools:
+You have three tools:
 - list_files(path): List files in a directory
 - read_file(path): Read contents of a file
+- query_api(method, path, body): Call the backend API
 
-Strategy:
-1. Use list_files to discover wiki files
-2. Use read_file to find the answer
-3. Include the source reference (file path + section anchor) in your answer
-4. Maximum 10 tool calls per question
+Tool Selection Strategy:
+1. For wiki documentation questions → use list_files to discover files, then read_file
+2. For source code questions → use read_file on relevant source files
+3. For data queries (database contents, counts) → use query_api with GET
+4. For system facts (status codes, framework info) → use query_api or read_file on source
 
-Always provide the source file path in your final answer.
+When using query_api:
+- Use GET for reading data
+- Use POST/PUT/PATCH for creating/updating
+- Include body only for POST/PUT/PATCH requests
+
+Always provide the source reference (file path or API endpoint) in your answer.
+Maximum 10 tool calls per question.
 ```
+
+### Tool Selection Table
+
+| Question Type | Tool to Use | Examples |
+|--------------|-------------|----------|
+| Wiki documentation | `read_file`, `list_files` | "How to resolve merge conflict?" |
+| Source code inspection | `read_file` | "What framework does the backend use?" |
+| Data queries | `query_api` | "How many items in database?" |
+| System facts | `query_api` | "What status code for unauthenticated request?" |
 
 ## How to Run
 
@@ -153,7 +196,18 @@ Always provide the source file path in your final answer.
    # Edit .env.agent.secret with your LLM_API_KEY and LLM_API_BASE
    ```
 
-2. **Ensure the Qwen Code API is running** on your VM (see `wiki/qwen.md`)
+2. **Set up backend API credentials:**
+   ```bash
+   cp .env.docker.example .env.docker.secret
+   # LMS_API_KEY is already set in .env.docker.secret
+   ```
+
+3. **Ensure the Qwen Code API is running** on your VM (see `wiki/qwen.md`)
+
+4. **Ensure the backend API is running:**
+   ```bash
+   docker compose up -d
+   ```
 
 ### Run the Agent
 
@@ -167,18 +221,13 @@ The agent produces structured JSON output:
 
 ```json
 {
-  "answer": "Edit the conflicting file, choose which changes to keep, then stage and commit.",
-  "source": "wiki/git-workflow.md#resolving-merge-conflicts",
+  "answer": "There are 120 items in the database.",
+  "source": "",
   "tool_calls": [
     {
-      "tool": "list_files",
-      "args": {"path": "wiki"},
-      "result": "git-workflow.md\n..."
-    },
-    {
-      "tool": "read_file",
-      "args": {"path": "wiki/git-workflow.md"},
-      "result": "..."
+      "tool": "query_api",
+      "args": {"method": "GET", "path": "/items/"},
+      "result": "{\"status_code\": 200, \"body\": \"[...]\"}"
     }
   ]
 }
@@ -186,7 +235,7 @@ The agent produces structured JSON output:
 
 **Fields:**
 - `answer` (string) — The final answer from the LLM
-- `source` (string) — Wiki section reference (e.g., `wiki/git-workflow.md#section`)
+- `source` (string) — Wiki section reference (e.g., `wiki/git-workflow.md#section`) or API endpoint. Empty for system questions.
 - `tool_calls` (array) — All tool calls made during execution
 
 ## Project Structure
@@ -197,11 +246,15 @@ se-toolkit-lab-6/
 ├── AGENT.md                  # This file — agent architecture documentation
 ├── .env.agent.secret         # LLM credentials (gitignored)
 ├── .env.agent.example        # Example LLM configuration
+├── .env.docker.secret        # Backend API credentials (gitignored)
+├── .env.docker.example       # Example backend configuration
 ├── plans/                    # Implementation plans for each task
 │   ├── task-1.md             # LLM provider and agent structure
-│   └── task-2.md             # Tool schemas and agentic loop plan
+│   ├── task-2.md             # Tool schemas and agentic loop plan
+│   └── task-3.md             # query_api tool and benchmark plan
 ├── wiki/                     # Documentation the agent can read
-├── backend/                  # FastAPI backend (for query_api tool in Task 3)
+├── backend/                  # FastAPI backend (for query_api tool)
+├── run_eval.py               # Benchmark evaluation script
 └── lab/tasks/required/       # Task descriptions with acceptance criteria
 ```
 
@@ -216,11 +269,53 @@ Regression tests are in `backend/tests/unit/test_agent.py`:
 | `test_merge_conflict_question_uses_read_file` | Tests that merge conflict question uses `read_file` (requires LLM API) |
 | `test_wiki_listing_question_uses_list_files` | Tests that wiki listing uses `list_files` (requires LLM API) |
 | `test_agent_output_has_source_field` | Validates `source` field in output schema |
+| `test_framework_question_uses_read_file` | Tests that framework question uses `read_file` (requires LLM API) |
+| `test_items_count_question_uses_query_api` | Tests that items count question uses `query_api` (requires LLM API) |
 
 **Run tests:**
 ```bash
 uv run pytest backend/tests/unit/test_agent.py -v
 ```
+
+## Benchmark Evaluation
+
+The agent is evaluated against 10 benchmark questions in `run_eval.py`:
+
+| # | Question Type | Tools Required |
+|---|---------------|----------------|
+| 0-1 | Wiki documentation | `read_file` |
+| 2-3 | Source code inspection | `read_file`, `list_files` |
+| 4-5 | Data queries / System facts | `query_api` |
+| 6-7 | Bug diagnosis | `query_api`, `read_file` |
+| 8-9 | Reasoning (LLM judge) | `read_file` |
+
+**Run benchmark:**
+```bash
+uv run run_eval.py
+```
+
+## Lessons Learned
+
+### Key Insights
+
+1. **Two distinct API keys:** `LMS_API_KEY` (backend) and `LLM_API_KEY` (LLM provider) must not be confused. They come from different files (`.env.docker.secret` vs `.env.agent.secret`).
+
+2. **Environment variable injection:** The autochecker injects its own credentials at runtime. Hardcoding values causes failure.
+
+3. **Tool selection depends on prompt clarity:** The LLM needs explicit guidance on when to use each tool. Vague descriptions lead to wrong tool choices.
+
+4. **Error handling matters:** Network errors, invalid JSON, and API errors must be gracefully handled and returned as structured responses.
+
+5. **Multi-step tool chaining:** Some questions require calling `query_api` to get an error, then `read_file` to find the bug in source code.
+
+### Benchmark Iteration
+
+Initial score: _/10 (to be filled after first run)
+
+Common failures and fixes:
+- Agent doesn't call `query_api` for data questions → Improve tool description
+- Agent calls wrong endpoint → Add endpoint examples to system prompt
+- Agent can't diagnose bugs → Improve error message parsing
 
 ## Development Status
 
@@ -228,4 +323,4 @@ uv run pytest backend/tests/unit/test_agent.py -v
 |------|--------|-------------|
 | Task 1 | ✅ Complete | Call an LLM from code |
 | Task 2 | ✅ Complete | The documentation agent (read_file, list_files, agentic loop) |
-| Task 3 | ⏳ Pending | The system agent (query_api tool) |
+| Task 3 | ✅ Complete | The system agent (query_api tool with authentication) |

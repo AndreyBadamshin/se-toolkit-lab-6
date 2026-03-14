@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any
 
@@ -27,13 +28,25 @@ MAX_TOOL_CALLS = 10
 class AgentSettings(BaseSettings):
     """LLM configuration from environment variables."""
 
-    llm_api_key: str
-    llm_api_base: str
-    llm_model: str
+    llm_api_key: str = ""
+    llm_api_base: str = ""
+    llm_model: str = ""
 
     model_config = {
-        "env_file": ".env.agent.secret",
-        "env_prefix": "LLM_",
+        "env_file": str(Path(__file__).parent / ".env.agent.secret"),
+        "env_prefix": "",
+    }
+
+
+class BackendApiSettings(BaseSettings):
+    """Backend API configuration from environment variables."""
+
+    lms_api_key: str = ""
+    agent_api_base_url: str = "http://localhost:42002"
+
+    model_config = {
+        "env_file": str(Path(__file__).parent / ".env.docker.secret"),
+        "env_prefix": "",
     }
 
 
@@ -71,6 +84,29 @@ TOOLS = [
             "required": ["path"],
         },
     },
+    {
+        "name": "query_api",
+        "description": "Call the backend API to query data or check system status. Use for questions about database contents, API responses, or system configuration.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "method": {
+                    "type": "string",
+                    "description": "HTTP method (GET, POST, PUT, DELETE, etc.)",
+                    "enum": ["GET", "POST", "PUT", "DELETE", "PATCH"],
+                },
+                "path": {
+                    "type": "string",
+                    "description": "API endpoint path (e.g., '/items/', '/analytics/scores')",
+                },
+                "body": {
+                    "type": "string",
+                    "description": "Optional JSON request body for POST/PUT/PATCH requests",
+                },
+            },
+            "required": ["method", "path"],
+        },
+    },
 ]
 
 
@@ -82,6 +118,11 @@ TOOLS = [
 def get_settings() -> AgentSettings:
     """Load agent settings from environment."""
     return AgentSettings()  # type: ignore[call-arg]
+
+
+def get_backend_settings() -> BackendApiSettings:
+    """Load backend API settings from environment."""
+    return BackendApiSettings()  # type: ignore[call-arg]
 
 
 # ---------------------------------------------------------------------------
@@ -153,10 +194,72 @@ def list_files(path: str) -> str:
     return "\n".join(sorted(entries))
 
 
+def query_api(method: str, path: str, body: str | None = None) -> str:
+    """
+    Call the backend API with authentication.
+
+    Args:
+        method: HTTP method (GET, POST, PUT, DELETE, PATCH).
+        path: API endpoint path (e.g., '/items/').
+        body: Optional JSON request body for POST/PUT/PATCH.
+
+    Returns:
+        JSON string with status_code and body, or an error message.
+    """
+    settings = get_backend_settings()
+    url = f"{settings.agent_api_base_url}{path}"
+
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {settings.lms_api_key}",
+    }
+
+    try:
+        with httpx.Client() as client:
+            if method == "GET":
+                response = client.get(url, headers=headers, timeout=10.0)
+            elif method in ("POST", "PUT", "PATCH"):
+                data = json.loads(body) if body else None
+                response = client.request(
+                    method, url, headers=headers, json=data, timeout=10.0
+                )
+            else:
+                response = client.request(method, url, headers=headers, timeout=10.0)
+
+        return json.dumps(
+            {
+                "status_code": response.status_code,
+                "body": response.text,
+            }
+        )
+    except httpx.RequestError as e:
+        return json.dumps(
+            {
+                "status_code": 0,
+                "body": f"Request error: {str(e)}",
+            }
+        )
+    except json.JSONDecodeError as e:
+        return json.dumps(
+            {
+                "status_code": 0,
+                "body": f"Invalid JSON body: {str(e)}",
+            }
+        )
+    except Exception as e:
+        return json.dumps(
+            {
+                "status_code": 0,
+                "body": f"Error: {type(e).__name__} - {str(e)}",
+            }
+        )
+
+
 # Map tool names to implementations
 TOOL_FUNCTIONS = {
     "read_file": read_file,
     "list_files": list_files,
+    "query_api": query_api,
 }
 
 
@@ -203,19 +306,26 @@ def build_system_prompt() -> str:
 
     Guides the LLM to use tools effectively and provide source references.
     """
-    return """You are a helpful assistant that answers questions by reading project documentation.
+    return """You are a helpful assistant that answers questions by reading project documentation, source code, and querying the backend API.
 
-You have two tools:
+You have three tools:
 - list_files(path): List files in a directory
 - read_file(path): Read contents of a file
+- query_api(method, path, body): Call the backend API
 
-Strategy:
-1. Use list_files to discover wiki files
-2. Use read_file to find the answer
-3. Include the source reference (file path + section anchor) in your answer
-4. Maximum 10 tool calls per question
+Tool Selection Strategy:
+1. For wiki documentation questions → use list_files to discover files, then read_file
+2. For source code questions → use read_file on relevant source files
+3. For data queries (database contents, counts) → use query_api with GET
+4. For system facts (status codes, framework info) → use query_api or read_file on source
 
-Always provide the source file path in your final answer."""
+When using query_api:
+- Use GET for reading data
+- Use POST/PUT/PATCH for creating/updating
+- Include body only for POST/PUT/PATCH requests
+
+Always provide the source reference (file path or API endpoint) in your answer.
+Maximum 10 tool calls per question."""
 
 
 # ---------------------------------------------------------------------------
@@ -291,11 +401,11 @@ def run_agent(question: str) -> dict[str, Any]:
 
         message = choices[0].get("message", {})
         tool_calls = message.get("tool_calls", [])
-        content = message.get("content", "")
+        content = message.get("content") or ""
 
         # Check if LLM returned a final answer (no tool calls)
         if not tool_calls:
-            answer = content or ""
+            answer = content
             # Extract source from answer if not already set
             if not source and answer:
                 source = extract_source_from_answer(answer)
@@ -360,10 +470,8 @@ def main() -> None:
         description="Agent CLI - answers questions by calling an LLM with tools."
     )
     parser.add_argument(
-        "--question",
-        "-q",
+        "question",
         type=str,
-        required=True,
         help="The question to ask the agent.",
     )
 

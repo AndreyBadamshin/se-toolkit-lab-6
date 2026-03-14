@@ -241,3 +241,96 @@ class TestDocumentationAgent:
             output = json.loads(result.stdout)
             assert "source" in output, "Output must contain 'source' field"
             assert isinstance(output["source"], str), "'source' must be a string"
+
+
+# ---------------------------------------------------------------------------
+# Tests: System Agent (Task 3)
+# ---------------------------------------------------------------------------
+
+
+class TestSystemAgent:
+    """Test the system agent with query_api tool scenarios."""
+
+    @pytest.mark.skip(
+        reason="Requires a running LLM API and backend API. "
+        "Unskip when .env.agent.secret and .env.docker.secret are configured."
+    )
+    def test_framework_question_uses_read_file(
+        self,
+        agent_script: Path,
+        env_with_llm_config: dict,
+    ) -> None:
+        """
+        Test that asking about backend framework uses read_file tool.
+
+        Expected: tool_calls contains 'read_file', answer contains 'FastAPI'
+        """
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(agent_script),
+                "--question",
+                "What framework does the backend use?",
+            ],
+            capture_output=True,
+            text=True,
+            env=env_with_llm_config,
+            timeout=60,
+        )
+
+        output = json.loads(result.stdout)
+
+        # Check required fields
+        assert "answer" in output
+        assert "tool_calls" in output
+
+        # Check that read_file was used
+        tools_used = [tc.get("tool") for tc in output["tool_calls"]]
+        assert "read_file" in tools_used, "Should use read_file tool"
+
+        # Check answer contains FastAPI
+        assert "FastAPI" in output["answer"], (
+            f"Answer should contain 'FastAPI', got: {output['answer']}"
+        )
+
+    @pytest.mark.skip(
+        reason="Requires a running LLM API and backend API. "
+        "Unskip when .env.agent.secret and .env.docker.secret are configured."
+    )
+    def test_items_count_question_uses_query_api(
+        self,
+        agent_script: Path,
+        env_with_llm_config: dict,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """
+        Test that asking about item count uses query_api tool.
+
+        Expected: tool_calls contains 'query_api'
+        """
+        # Set up backend API config
+        monkeypatch.setenv("LMS_API_KEY", "test-key")
+        monkeypatch.setenv("AGENT_API_BASE_URL", "http://localhost:42002")
+
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(agent_script),
+                "--question",
+                "How many items are in the database?",
+            ],
+            capture_output=True,
+            text=True,
+            env=env_with_llm_config,
+            timeout=60,
+        )
+
+        output = json.loads(result.stdout)
+
+        # Check required fields
+        assert "answer" in output
+        assert "tool_calls" in output
+
+        # Check that query_api was used
+        tools_used = [tc.get("tool") for tc in output["tool_calls"]]
+        assert "query_api" in tools_used, "Should use query_api tool"
