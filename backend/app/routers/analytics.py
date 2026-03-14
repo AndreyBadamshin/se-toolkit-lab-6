@@ -27,7 +27,9 @@ async def _find_lab_and_tasks(
     lab_padded = lab.replace("lab-", "").zfill(2)
 
     # Search for lab by title
-    labs = (await session.exec(select(ItemRecord).where(ItemRecord.type == "lab"))).all()
+    labs = (
+        await session.exec(select(ItemRecord).where(ItemRecord.type == "lab"))
+    ).all()
     lab_item = None
     for item in labs:
         if f"Lab {lab_padded}" in item.title or f"Lab {lab_number}" in item.title:
@@ -107,7 +109,9 @@ async def get_pass_rates(
     results = []
     for task in sorted(tasks, key=lambda t: t.title):
         stmt = select(
-            func.round(cast(func.avg(InteractionLog.score), Numeric), 1).label("avg_score"),
+            func.round(cast(func.avg(InteractionLog.score), Numeric), 1).label(
+                "avg_score"
+            ),
             func.count().label("attempts"),
         ).where(
             InteractionLog.item_id == task.id,
@@ -115,11 +119,13 @@ async def get_pass_rates(
         )
         row = (await session.exec(stmt)).first()
         if row and row.attempts > 0:
-            results.append({
-                "task": task.title,
-                "avg_score": float(row.avg_score) if row.avg_score else 0.0,
-                "attempts": row.attempts,
-            })
+            results.append(
+                {
+                    "task": task.title,
+                    "avg_score": float(row.avg_score) if row.avg_score else 0.0,
+                    "attempts": row.attempts,
+                }
+            )
 
     return results
 
@@ -161,7 +167,9 @@ async def get_groups(
     stmt = (
         select(
             Learner.student_group.label("group"),
-            func.round(cast(func.avg(InteractionLog.score), Numeric), 1).label("avg_score"),
+            func.round(cast(func.avg(InteractionLog.score), Numeric), 1).label(
+                "avg_score"
+            ),
             func.count(func.distinct(InteractionLog.learner_id)).label("students"),
         )
         .join(Learner, InteractionLog.learner_id == Learner.id)
@@ -193,19 +201,15 @@ async def get_completion_rate(
     _, item_ids = await _find_lab_and_tasks(lab, session)
 
     # Count distinct learners with any interaction
-    total_stmt = (
-        select(func.count(func.distinct(InteractionLog.learner_id)))
-        .where(InteractionLog.item_id.in_(item_ids))
+    total_stmt = select(func.count(func.distinct(InteractionLog.learner_id))).where(
+        InteractionLog.item_id.in_(item_ids)
     )
     total_learners = (await session.exec(total_stmt)).one()
 
     # Count distinct learners who scored >= 60
-    passed_stmt = (
-        select(func.count(func.distinct(InteractionLog.learner_id)))
-        .where(
-            InteractionLog.item_id.in_(item_ids),
-            InteractionLog.score >= 60,
-        )
+    passed_stmt = select(func.count(func.distinct(InteractionLog.learner_id))).where(
+        InteractionLog.item_id.in_(item_ids),
+        InteractionLog.score >= 60,
     )
     passed_learners = (await session.exec(passed_stmt)).one()
 
