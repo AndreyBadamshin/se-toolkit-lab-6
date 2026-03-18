@@ -1,0 +1,2 @@
+Using CPython 3.14.2
+error: failed to remove file `c:\programs\software-engineering-toolkit\se-toolkit-lab-6\.venv\lib64`: Отказано в доступе. (os error 5)
